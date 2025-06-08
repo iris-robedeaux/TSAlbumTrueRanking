@@ -3,7 +3,7 @@ library(tidyverse)
 library(taylor)
 
 #load in the data
-lastfmData <- read.csv("C:\\Users\\theba\\Desktop\\taylor analysis\\honeybeats.csv", header = FALSE)
+lastfmData <- read.csv("FILE PATH TO CSV", header = FALSE)
 
 #rename lastfm columns
 lastfmData <- lastfmData %>% rename(
