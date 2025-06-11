@@ -6,6 +6,7 @@ This script calculates a weighted count of listens for each Taylor Swift album b
 - Some liberties were taken with the albums. Eyes Open and Safe and Sound TV's are included in Red, and similarly, All The Girls You Loved Before is included in Lover. These tracks are also included within the album weights.
 - If This Was A Movie is included in Speak Now. Live with it.
 - The script corrects "albums" like "The More Lover Chapter" and single titles into thier respective albums. This list is likely incomplete, and might need tuning if you listen to the single releases a lot. If you do add some, send a pull request!
+- Taylor's Versions are combined with the original versions of the applicable albums.
 
 # Sample Output
 Below is my own output for 2024. The album name is listed, 'n' the raw number of streams (every listen to a song on that album), the weights are 1/(number of tracks on the album), and the weighted count is the n multiplied by the weights, essentially the number of times an album was streamed front to back. 
