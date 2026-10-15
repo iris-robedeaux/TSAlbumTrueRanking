@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Taylor Swift Album True Ranking</title>
+<style>
+  :root {
+    --bg: #fbf9f6; --fg: #231f20; --muted: #6b6466; --card: #ffffff;
+    --line: #e4dfda; --accent: #7b3fa0; --bar: #d9c3e8; --error: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17141a; --fg: #efeaf2; --muted: #a49cab; --card: #211d26;
+      --line: #342f3a; --accent: #c49be0; --bar: #4a3560; --error: #ff8a80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.8rem; margin: 0 0 8px; }
+  .lead { color: var(--muted); margin: 0 0 24px; }
+  form {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px;
+  }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted); }
+  input {
+    font: inherit; color: var(--fg); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  }
+  input#user { min-width: 220px; }
+  input#year { width: 100px; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 8px; padding: 9px 16px;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff;
+  }
+  @media (prefers-color-scheme: dark) { button { color: #17141a; } }
+  button.secondary { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { min-height: 1.5em; margin: 16px 0 0; color: var(--muted); }
+  #status.error { color: var(--error); }
+  section { margin-top: 24px; }
+  table { width: 100%; border-collapse: collapse; background: var(--card);
+          border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); }
+  th { font-size: .8rem; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.rank { width: 2.5em; color: var(--muted); }
+  .barcell { position: relative; }
+  .bar { position: absolute; inset: 0 auto 0 0; background: var(--bar); opacity: .55; z-index: 0; }
+  .barcell span { position: relative; z-index: 1; }
+  .note { color: var(--muted); font-size: .9rem; }
+  details { margin-top: 16px; color: var(--muted); font-size: .9rem; }
+  details ul { margin: 8px 0 0; padding-left: 20px; }
+  .table-wrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Taylor Swift Album True Ranking</h1>
+  <p class="lead">
+    Raw listen counts favor albums with more tracks. This page weights each album's
+    plays by its track count, so the number shown is roughly how many times you
+    played it front to back.
+  </p>
+
+  <form id="form">
+    <label>Last.fm username
+      <input id="user" autocomplete="off" required>
+    </label>
+    <label>Year
+      <input id="year" type="number" min="2002" max="2100" required>
+    </label>
+    <button id="go" type="submit">Get my ranking</button>
+    <button id="cancel" type="button" class="secondary" hidden>Cancel</button>
+  </form>
+
+  <p id="status" role="status" aria-live="polite"></p>
+
+  <section id="results" hidden>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Album</th>
+            <th class="num">Plays</th>
+            <th class="num">Tracks</th>
+            <th class="num">Weighted</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="note" id="summary"></p>
+    <details id="unmatchedBox" hidden>
+      <summary>Taylor Swift scrobbles not counted toward an album</summary>
+      <p>These album names weren't in the list of known albums and editions, so they
+         were left out. If one belongs to an album, add it to <code>ALIASES</code> in the page source.</p>
+      <ul id="unmatched"></ul>
+    </details>
+  </section>
+</main>
+
+<script>
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+// Free key from https://www.last.fm/api/account/create. Keys for read-only
+// calls like this one are visible to anyone who views the page source, which
+// is normal for client-side Last.fm tools.
+const API_KEY = "bead17a648dfea3ca61d7ed8c0b8e2b3";
+
+const ARTIST = "Taylor Swift";
+const CONCURRENCY = 4;   // pages fetched at once
+
+// Number of tracks on each album (the weights are 1 / tracks).
+const TRACKS = {
+  "Taylor Swift": 15,
+  "Fearless": 26,
+  "Speak Now": 23,
+  "Red": 32,
+  "1989": 21,
+  "Reputation": 15,
+  "Lover": 19,
+  "folklore": 17,
+  "evermore": 17,
+  "Midnights": 23,
+  "THE TORTURED POETS DEPARTMENT": 31,
+  "The Life of a Showgirl": 16
+};
+
+// Editions, deluxe versions, re-recordings and single releases folded into
+// their parent album (same mapping as taylorAnalysis.R).
+const ALIASES = {
+  "1989 (Taylor's Version)": "1989",
+  "1989 (Taylor's Version) [Deluxe]": "1989",
+  "All of the Girls You Loved Before": "Lover",
+  "All Too Well (10 Minute Version) (The Short Film)": "Red",
+  "evermore (deluxe version)": "evermore",
+  "Eyes Open (Taylor's Version)": "Red",
+  "Fearless (Taylor's Version)": "Fearless",
+  "folklore (deluxe version)": "folklore",
+  "Hannah Montana The Movie": "Taylor Swift",
+  "If This Was a Movie (Taylor's Version)": "Speak Now",
+  "Love Story (Taylor's Version)": "Fearless",
+  "Midnights (3am Edition)": "Midnights",
+  "Midnights (Complete Edition)": "Midnights",
+  "Midnights (The Til Dawn Edition)": "Midnights",
+  "Mr. Perfectly Fine (Taylor's Version) (From The Vault)": "Fearless",
+  "Red (Deluxe Edition)": "Red",
+  "Red (Taylor's Version)": "Red",
+  "Safe & Sound (Taylor's Version)": "Red",
+  "Speak Now (Deluxe Package)": "Speak Now",
+  "Speak Now (Taylor's Version)": "Speak Now",
+  "The Cruelest Summer": "Lover",
+  "The More Fearless (Taylor's Version) Chapter": "Speak Now",
+  "The More Lover Chapter": "Lover",
+  "THE TORTURED POETS DEPARTMENT: THE ANTHOLOGY": "THE TORTURED POETS DEPARTMENT",
+  "Wildest Dreams (Taylor's Version)": "1989",
+  "You're Losing Me (From the Vault)": "Midnights",
+  "You All Over Me (feat. Maren Morris) (Taylor's Version) (From The Vault)": "Fearless",
+
+  // Added from the unmatched list
+  "The Life of a Showgirl + Acoustic Collection": "The Life of a Showgirl",
+  "The Life of a Showgirl (Track by Track Version)": "The Life of a Showgirl",
+  "The Life of a Showgirl: The Encore": "The Life of a Showgirl",
+  "folklore: the long pond studio sessions (from the Disney+ special) [deluxe edition]": "folklore",
+  "The Tortured Poets Department (The Extras Chapter)": "THE TORTURED POETS DEPARTMENT",
+  "1989 (Deluxe Edition)": "1989",
+  "1989 (Deluxe)": "1989",
+  "willow (the witch collection)": "evermore",
+  "1989 (Taylor's Version) Digital Deluxe Album + \"Slut!\" (Acoustic Version) (Taylor's Version)": "1989",
+  "Fortnight (Acoustic Version)": "THE TORTURED POETS DEPARTMENT",
+  "Lover (Unreleased/Demos)": "Lover",
+  "cardigan (cabin in candlelight version)": "folklore",
+  "Speak Now (Deluxe Edition)": "Speak Now",
+  "Fearless Platinum Edition": "Fearless",
+  "the lakes (original version)": "folklore",
+  "Red (Big Machine Radio Release Special)": "Red",
+  "Lavender Haze (Acoustic Version)": "Midnights",
+  "betty (Live from the 2020 Academy of Country Music Awards)": "folklore",
+  "Anti-Hero (Remixes)": "Midnights",
+  "Cornelia Street (Live From Paris)": "Lover",
+  "Death by a Thousand Cuts (Live from Paris)": "Lover",
+ "All Too Well (Sad Girl Autumn Version) - Recorded at Long Pond Studios": "Red",
+  "ME! (Live from Paris)": "Lover",
+  "This Love (Taylor’s Version)": "1989",
+  "Sweeter Than Fiction": "1989",
+  "The Fate of Ophelia (The Chainsmokers Remix)": "The Life of a Showgirl",
+  "Daylight (Live From Paris)": "Lover",
+  "Anti-Hero (Acoustic Version)": "Midnights",
+  "The Fate of Ophelia (Alone In My Tower Acoustic Version)": "The Life of a Showgirl",
+  "Lover (First Dance Remix)": "Lover",
+  "Bad Blood": "1989",
+  "Message In A Bottle (Fat Max G Remix) (Taylor’s Version)": "Red",
+  "You Need to Calm Down (Live from Paris)": "Lover",
+  "willow (lonely witch version)": "evermore",
+  "ME! (feat. Brendon Urie of Panic! at the Disco)": "Lover",
+  "Midnights (Lavender Edition)": "Midnights",
+  "The Archer (Live from Paris)": "Lover",
+  "Opalite": "The Life of a Showgirl",
+  "Lover (Live from Paris)": "Lover",
+  "Elizabeth Taylor": "The Life of a Showgirl",
+  "Midnights [Bonus Tracks]": "Midnights",
+  "Opalite (BUNT. Remix)": "The Life of a Showgirl"
+};
+
+// ---------------------------------------------------------------------------
+// Album lookup (ignores case and curly vs straight apostrophes)
+// ---------------------------------------------------------------------------
+const norm = s => (s || "").replace(/[\u2018\u2019]/g, "'").trim().toLowerCase();
+
+const LOOKUP = new Map();
+for (const album of Object.keys(TRACKS)) LOOKUP.set(norm(album), album);
+for (const [alias, album] of Object.entries(ALIASES)) LOOKUP.set(norm(alias), album);
+
+// ---------------------------------------------------------------------------
+// Last.fm API
+// ---------------------------------------------------------------------------
+class LfmError extends Error {
+  constructor(code, message) { super(message); this.code = code; }
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function lfm(params, signal) {
+  const url = "https://ws.audioscrobbler.com/2.0/?" +
+    new URLSearchParams({ ...params, api_key: API_KEY, format: "json" });
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const res = await fetch(url, { signal });
+      const data = await res.json();
+      if (data.error) {
+        // 8 = operation failed, 16 = temporary error, 29 = rate limit
+        if ([8, 16, 29].includes(data.error)) {
+          await sleep(1000 * (attempt + 1));
+          continue;
+        }
+        throw new LfmError(data.error, data.message);
+      }
+      return data;
+    } catch (e) {
+      if (e.name === "AbortError" || e instanceof LfmError) throw e;
+      await sleep(1000 * (attempt + 1));
+    }
+  }
+  throw new Error("Last.fm didn't respond after several tries. Try again in a moment.");
+}
+
+// ---------------------------------------------------------------------------
+// Page logic
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const form = $("form"), statusEl = $("status"), goBtn = $("go"), cancelBtn = $("cancel");
+let controller = null;
+
+$("year").value = new Date().getFullYear();
+
+function setStatus(msg, isError = false) {
+  statusEl.textContent = msg;
+  statusEl.classList.toggle("error", isError);
+}
+
+form.addEventListener("submit", async e => {
+  e.preventDefault();
+  if (API_KEY === "YOUR_LASTFM_API_KEY") {
+    setStatus("Add your Last.fm API key at the top of the script in index.html first.", true);
+    return;
+  }
+  const user = $("user").value.trim();
+  const year = parseInt($("year").value, 10);
+
+  controller = new AbortController();
+  goBtn.disabled = true;
+  cancelBtn.hidden = false;
+  $("results").hidden = true;
+  setStatus("Looking up " + user + "...");
+
+  try {
+    const scrobbles = await fetchYear(user, year, controller.signal);
+    const result = analyze(scrobbles);
+    render(result, scrobbles.length, year);
+    setStatus("");
+  } catch (err) {
+    if (err.name === "AbortError") setStatus("Cancelled.");
+    else setStatus(friendlyError(err), true);
+  } finally {
+    goBtn.disabled = false;
+    cancelBtn.hidden = true;
+    controller = null;
+  }
+});
+
+cancelBtn.addEventListener("click", () => controller && controller.abort());
+
+function friendlyError(err) {
+  if (err instanceof LfmError) {
+    if (err.code === 6) return "Couldn't find that Last.fm user.";
+    if (err.code === 17) return "That profile hides its listening history (Last.fm privacy settings), so it can't be read.";
+    if (err.code === 10) return "The API key was rejected. Check the key at the top of the script.";
+    return "Last.fm error: " + err.message;
+  }
+  return err.message || "Something went wrong.";
+}
+
+// Fetch every scrobble in the given calendar year (UTC), as {artist, album}.
+async function fetchYear(user, year, signal) {
+  const from = Math.floor(Date.UTC(year, 0, 1) / 1000);
+  const to = Math.floor(Date.UTC(year + 1, 0, 1) / 1000) - 1;
+  const base = { method: "user.getRecentTracks", user, from, to, limit: 200 };
+
+  const first = await lfm({ ...base, page: 1 }, signal);
+  const totalPages = parseInt(first.recenttracks["@attr"].totalPages, 10) || 0;
+  const total = parseInt(first.recenttracks["@attr"].total, 10) || 0;
+  if (total === 0) throw new Error("No scrobbles found for " + user + " in " + year + ".");
+
+  const pages = new Array(totalPages + 1);
+  pages[1] = first;
+  let next = 2, done = 1;
+  setStatus("Fetching page 1 of " + totalPages + "...");
+
+  async function worker() {
+    while (next <= totalPages) {
+      const p = next++;
+      pages[p] = await lfm({ ...base, page: p }, signal);
+      done++;
+      setStatus("Fetching page " + done + " of " + totalPages + "...");
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, totalPages) }, worker));
+
+  const out = [];
+  for (let p = 1; p <= totalPages; p++) {
+    const tracks = [].concat(pages[p].recenttracks.track || []);
+    for (const t of tracks) {
+      if (t["@attr"] && t["@attr"].nowplaying) continue;   // no timestamp, skip
+      out.push({ artist: t.artist["#text"], album: t.album["#text"] });
+    }
+  }
+  return out;
+}
+
+// Same steps as taylorAnalysis.R: keep Taylor, fold editions into albums,
+// count plays, weight by 1 / tracks, sort.
+function analyze(scrobbles) {
+  const counts = {};
+  const unmatched = new Map();
+  let taylorTotal = 0;
+
+  for (const s of scrobbles) {
+    if (s.artist !== ARTIST) continue;
+    taylorTotal++;
+    const album = LOOKUP.get(norm(s.album));
+    if (album) counts[album] = (counts[album] || 0) + 1;
+    else unmatched.set(s.album || "(no album)", (unmatched.get(s.album || "(no album)") || 0) + 1);
+  }
+
+  const rows = Object.entries(counts).map(([album, n]) => ({
+    album, n, tracks: TRACKS[album], weighted: n / TRACKS[album]
+  })).sort((a, b) => b.weighted - a.weighted);
+
+  const unmatchedList = [...unmatched.entries()].sort((a, b) => b[1] - a[1]);
+  return { rows, taylorTotal, unmatchedList };
+}
+
+function cell(tag, text, cls) {
+  const el = document.createElement(tag);
+  el.textContent = text;
+  if (cls) el.className = cls;
+  return el;
+}
+
+function render({ rows, taylorTotal, unmatchedList }, allCount, year) {
+  const tbody = $("rows");
+  tbody.replaceChildren();
+
+  if (!rows.length) {
+    setStatus("No Taylor Swift album plays found for " + year + ".", true);
+    return;
+  }
+
+  const max = rows[0].weighted;
+  rows.forEach((r, i) => {
+    const tr = document.createElement("tr");
+    tr.append(cell("td", i + 1, "rank"), cell("td", r.album));
+    tr.append(cell("td", r.n.toLocaleString(), "num"), cell("td", r.tracks, "num"));
+
+    const td = document.createElement("td");
+    td.className = "num barcell";
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    bar.style.width = (r.weighted / max * 100) + "%";
+    const span = document.createElement("span");
+    span.textContent = r.weighted.toFixed(2);
+    td.append(bar, span);
+    tr.append(td);
+    tbody.append(tr);
+  });
+
+  const counted = rows.reduce((a, r) => a + r.n, 0);
+  $("summary").textContent =
+    allCount.toLocaleString() + " scrobbles in " + year + ", " +
+    taylorTotal.toLocaleString() + " by Taylor Swift, " +
+    counted.toLocaleString() + " matched to an album. " +
+    "Weighted = plays / tracks on the album.";
+
+  const box = $("unmatchedBox"), list = $("unmatched");
+  list.replaceChildren();
+  box.hidden = unmatchedList.length === 0;
+  for (const [name, n] of unmatchedList.slice(0, 25)) {
+    const li = document.createElement("li");
+    li.textContent = name + " (" + n + ")";
+    list.append(li);
+  }
+
+  $("results").hidden = false;
+}
+</script>
+</body>
+</html>
